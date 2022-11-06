@@ -1,0 +1,216 @@
+
+
+
+
+Audio/Video Transport Core Maintenance                       P. Thatcher
+Internet-Draft                                                 Microsoft
+Intended status: Standards Track                         6 November 2022
+Expires: 10 May 2023
+
+
+                       SFrame over RTP over QUIC
+            draft-pthatcher-sframe-over-rtp-over-quic-latest
+
+Abstract
+
+   This document specifies how to send SFrame
+   [I-D.draft-ietf-sframe-enc-00] over RTP over QUIC
+   [I-D.draft-ietf-avtcore-rtp-over-quic-01], including how to translate
+   SFrame from RTP over QUIC to RTP over UDP.
+
+Status of This Memo
+
+   This Internet-Draft is submitted in full conformance with the
+   provisions of BCP 78 and BCP 79.
+
+   Internet-Drafts are working documents of the Internet Engineering
+   Task Force (IETF).  Note that other groups may also distribute
+   working documents as Internet-Drafts.  The list of current Internet-
+   Drafts is at https://datatracker.ietf.org/drafts/current/.
+
+   Internet-Drafts are draft documents valid for a maximum of six months
+   and may be updated, replaced, or obsoleted by other documents at any
+   time.  It is inappropriate to use Internet-Drafts as reference
+   material or to cite them other than as "work in progress."
+
+   This Internet-Draft will expire on 10 May 2023.
+
+Copyright Notice
+
+   Copyright (c) 2022 IETF Trust and the persons identified as the
+   document authors.  All rights reserved.
+
+   This document is subject to BCP 78 and the IETF Trust's Legal
+   Provisions Relating to IETF Documents (https://trustee.ietf.org/
+   license-info) in effect on the date of publication of this document.
+   Please review these documents carefully, as they describe your rights
+   and restrictions with respect to this document.  Code Components
+   extracted from this document must include Revised BSD License text as
+   described in Section 4.e of the Trust Legal Provisions and are
+   provided without warranty as described in the Revised BSD License.
+
+Table of Contents
+
+   1.  Introduction
+   2.  Terminology and Notation
+   3.  How to combine SFrame and RTP over QUIC
+   4.  Supported RTP Topologies
+   5.  SFrame Packetization
+     5.1.  Tradeoffs
+   6.  Security Considerations
+   7.  References
+     7.1.  Normative References
+     7.2.  Informative References
+   Author's Address
+
+1.  Introduction
+
+   RTP over QUIC [I-D.draft-ietf-avtcore-rtp-over-quic-01] describes how
+   to send and received real-time media over QUIC.
+
+   SFrame [I-D.draft-ietf-sframe-enc-00] describes how to encrypt a
+   media frame such that media servers (such as SFUs) have access to
+   certain metadata, but not to the media.
+
+   This document describes how to send SFrame over RTP over QUIC while
+   maintaining support for the encryption properties supported by SFrame
+   and the RTP topologies supported by RTP over QUIC.
+
+2.  Terminology and Notation
+
+   The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT",
+   "SHOULD", "SHOULD NOT", "RECOMMENDED", "NOT RECOMMENDED", "MAY", and
+   "OPTIONAL" in this document are to be interpreted as described in BCP
+   14 [RFC2119] [RFC8174] when, and only when, they appear in all
+   capitals, as shown here.
+
+3.  How to combine SFrame and RTP over QUIC
+
+   To send SFrame [I-D.draft-ietf-sframe-enc-00] over RTP over QUIC
+   [I-D.draft-ietf-avtcore-rtp-over-quic-01] using reliable QUIC streams
+   ([I-D.draft-ietf-avtcore-rtp-over-quic-01] Section 6.1), one SFrame
+   is sent over one QUIC stream.  When sending with unreliable datagrams
+   ([I-D.draft-ietf-avtcore-rtp-over-quic-01] Section 6.2), the SFrame
+   payload must be packetized before sending as described in
+   [I-D.draft-ietf-sframe-enc-00] Section 4.
+
+4.  Supported RTP Topologies
+
+   [I-D.draft-ietf-avtcore-rtp-over-quic-01] Section 4.1 describes the
+   RTP topologies supported RTP over QUIC and the use of RTP
+   translators.  Notably, translation from from larger RTP packets (such
+   as those sent over QUIC streams) to smaller RTP packets (such as
+   those sent over UDP) is supported, and thus is also supported when
+   sending SFrame over RTP over QUIC.  In this case, according to
+   Section 4.1, "Such a translator may need codec-specific knowledge to
+   packetize the payload of the incoming RTP packets in smaller RTP
+   packets."
+
+   Because SFrame encrypts the media contained in it, the only "codec-
+   specific knowedge" a translator can get to when using SFrame is that
+   of SFrame itself.  In effect, SFrame is the codec, and the transator
+   must know how to packetize SFrame.
+
+5.  SFrame Packetization
+
+   [I-D.draft-ietf-sframe-enc-00] refers to a "generic RTP packetizer",
+   but the format for that packetization is not defined.  So for
+   purposes of translating from SFrame over RTP over QUIC to SFrame over
+   RTP over UDP, we define an SFrame packetization here.
+
+   When translating from one large RTP packet to many small RTP packets
+   (such as a QUIC stream containing an SFrame to many RTP packets over
+   UDP), the following format MAY be used:
+
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |  large sequence number        |   chunk index                 |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                  large payload chunk                          |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+   When using this format, the translator MUST construct small RTP
+   packets such that they may be translated back into a large RTP packet
+   using the following steps:
+
+   1.  The large RTP packet's payload is reconstructed by concatenating
+       the large payload chunks of all the small RTP packets that share
+       a large sequence number in the order of the chunk indexes
+       beginning from index 0 until the smaller RTP packet marked with
+       the marker bit (indicating "last chunk").
+
+   2.  The large RTP header is reconstructed by copying the RTP header
+       of the small RTP packet with chunk index 0 and replacing the
+       sequence number with the large sequence number.
+
+   To be explicit, a translator using this format to translate from a
+   large RTP packet to small RTP packets MUST:
+
+   1.  Set the large sequence number in all of the small RTP packets to
+       the sequence number of the large RTP packet.
+
+   2.  Set the chunk index of the first small RTP packet to 0.
+
+   3.  Set the chunk index to consectutive values for consecutive large
+       payload chunks.
+
+   4.  Unset (set to 0) the marker bit for all but the last small RTP
+       packet.
+
+   5.  Set the marker bit for the last small RTP packet.
+
+5.1.  Tradeoffs
+
+   It may be possible to save 1 byte by deriving the chunk index from
+   the smaller RTP packet's sequence number and a bit somewhere that
+   means "this is the first chunk", but that would come at the cost of
+   additional complexity and reduced flexibility.  This format
+   simplifies packet reconstruction when chunks arrive out of order, and
+   allows for more flexibility in translation.  For example, if a
+   translator wanted to translate from smaller packets to larger packets
+   but received chunk indexes 1 and 2 before chunk index 0, it could
+   begin forwarding 1 and 2 in one QUIC stream while waiting for index
+   0.  It wouldn't have to wait for the first chunk of a frame before
+   forwarding subsequent chunks.
+
+6.  Security Considerations
+
+   This document is subject to the security considerations of SFrame
+   [I-D.draft-ietf-sframe-enc-00] and RTP over QUIC
+   [I-D.draft-ietf-avtcore-rtp-over-quic-01].
+
+7.  References
+
+7.1.  Normative References
+
+   [RFC2119]  Bradner, S., "Key words for use in RFCs to Indicate
+              Requirement Levels", BCP 14, RFC 2119,
+              DOI 10.17487/RFC2119, March 1997,
+              <https://www.rfc-editor.org/rfc/rfc2119>.
+
+   [RFC8174]  Leiba, B., "Ambiguity of Uppercase vs Lowercase in RFC
+              2119 Key Words", BCP 14, RFC 8174, DOI 10.17487/RFC8174,
+              May 2017, <https://www.rfc-editor.org/rfc/rfc8174>.
+
+7.2.  Informative References
+
+   [I-D.draft-ietf-avtcore-rtp-over-quic-01]
+              Ott, J. and M. Engelbart, "RTP over QUIC", Work in
+              Progress, Internet-Draft, draft-ietf-avtcore-rtp-over-
+              quic-01, 24 October 2022,
+              <https://datatracker.ietf.org/doc/html/draft-ietf-avtcore-
+              rtp-over-quic-01>.
+
+   [I-D.draft-ietf-sframe-enc-00]
+              Omara, E., Uberti, J., Murillo, S. G., Barnes, R., and Y.
+              Fablet, "Secure Frame (SFrame)", Work in Progress,
+              Internet-Draft, draft-ietf-sframe-enc-00, 29 July 2022,
+              <https://datatracker.ietf.org/doc/html/draft-ietf-sframe-
+              enc-00>.
+
+Author's Address
+
+   Peter Thatcher
+   Microsoft
+   Email: pthatcher@microsoft.com
